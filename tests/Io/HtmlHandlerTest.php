@@ -1,9 +1,9 @@
 <?php
 
-namespace Framework\Tests;
+namespace Framework\Tests\Io;
 
+use FrameworkX\Io\HtmlHandler;
 use PHPUnit\Framework\TestCase;
-use FrameworkX\HtmlHandler;
 
 class HtmlHandlerTest extends TestCase
 {
@@ -59,7 +59,7 @@ class HtmlHandlerTest extends TestCase
                 'h&lt;e&gt;llo'
             ],
             [
-                utf8_decode('hellö.txt'),
+                "hell\xF6.txt",
                 'hell�.txt'
             ],
             [

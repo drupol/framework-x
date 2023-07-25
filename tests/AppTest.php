@@ -6,10 +6,10 @@ use FrameworkX\AccessLogHandler;
 use FrameworkX\App;
 use FrameworkX\Container;
 use FrameworkX\ErrorHandler;
-use FrameworkX\FiberHandler;
-use FrameworkX\MiddlewareHandler;
-use FrameworkX\RouteHandler;
-use FrameworkX\SapiHandler;
+use FrameworkX\Io\FiberHandler;
+use FrameworkX\Io\MiddlewareHandler;
+use FrameworkX\Io\RouteHandler;
+use FrameworkX\Io\SapiHandler;
 use FrameworkX\Tests\Fixtures\InvalidAbstract;
 use FrameworkX\Tests\Fixtures\InvalidConstructorInt;
 use FrameworkX\Tests\Fixtures\InvalidConstructorIntersection;
@@ -38,29 +38,6 @@ use function React\Promise\resolve;
 
 class AppTest extends TestCase
 {
-    /**
-     * @var array
-     */
-    private $serverArgs;
-
-    protected function setUp(): void
-    {
-        // Store a snapshot of $_SERVER
-        $this->serverArgs = $_SERVER;
-    }
-
-    protected function tearDown(): void
-    {
-        // Restore $_SERVER as it was before
-        foreach ($_SERVER as $key => $value) {
-            if (!\array_key_exists($key, $this->serverArgs)) {
-                unset($_SERVER[$key]);
-                continue;
-            }
-            $_SERVER[$key] = $value;
-        }
-    }
-
     public function testConstructWithMiddlewareAssignsGivenMiddleware()
     {
         $middleware = function () { };
@@ -87,9 +64,15 @@ class AppTest extends TestCase
         $this->assertInstanceOf(RouteHandler::class, $handlers[3]);
     }
 
-    public function testConstructWithContainerAssignsContainerForRouteHandlerOnly()
+    public function testConstructWithContainerAssignsDefaultHandlersAndContainerForRouteHandlerOnly()
     {
-        $container = new Container();
+        $accessLogHandler = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getAccessLogHandler')->willReturn($accessLogHandler);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
         $app = new App($container);
 
         $ref = new ReflectionProperty($app, 'handler');
@@ -107,8 +90,8 @@ class AppTest extends TestCase
         }
 
         $this->assertCount(3, $handlers);
-        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
-        $this->assertInstanceOf(ErrorHandler::class, $handlers[1]);
+        $this->assertSame($accessLogHandler, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
         $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
 
         $routeHandler = $handlers[2];
@@ -152,6 +135,449 @@ class AppTest extends TestCase
         $this->assertSame($container, $ref->getValue($routeHandler));
     }
 
+    public function testConstructWithErrorHandlerOnlyAssignsErrorHandlerAfterDefaultAccessLogHandler()
+    {
+        $errorHandler = new ErrorHandler();
+
+        $app = new App($errorHandler);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithErrorHandlerClassOnlyAssignsErrorHandlerAfterDefaultAccessLogHandler()
+    {
+        $app = new App(ErrorHandler::class);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertInstanceOf(ErrorHandler::class, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithContainerAndErrorHandlerAssignsErrorHandlerAfterDefaultAccessLogHandler()
+    {
+        $errorHandler = new ErrorHandler();
+
+        $app = new App(new Container(), $errorHandler);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithContainerAndErrorHandlerClassAssignsErrorHandlerFromContainerAfterDefaultAccessLogHandler()
+    {
+        $errorHandler = new ErrorHandler();
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($container, ErrorHandler::class);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithMultipleContainersAndErrorHandlerClassAssignsErrorHandlerFromLastContainerBeforeErrorHandlerAfterDefaultAccessLogHandler()
+    {
+        $errorHandler = new ErrorHandler();
+
+        $unused = $this->createMock(Container::class);
+        $unused->expects($this->never())->method('getErrorHandler');
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($unused, $container, ErrorHandler::class, $unused);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithMultipleContainersAndMiddlewareAssignsErrorHandlerFromLastContainerBeforeMiddlewareAfterDefaultAccessLogHandler()
+    {
+        $middleware = function (ServerRequestInterface $request, callable $next) { };
+        $errorHandler = new ErrorHandler();
+
+        $unused = $this->createMock(Container::class);
+        $unused->expects($this->never())->method('getErrorHandler');
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($unused, $container, $middleware, $unused);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(4, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertSame($middleware, $handlers[2]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[3]);
+    }
+
+    public function testConstructWithMiddlewareAndErrorHandlerAssignsGivenErrorHandlerAfterMiddlewareAndDefaultAccessLogHandlerAndErrorHandlerFirst()
+    {
+        $middleware = function (ServerRequestInterface $request, callable $next) { };
+        $errorHandler = new ErrorHandler();
+
+        $app = new App($middleware, $errorHandler);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(5, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertInstanceOf(ErrorHandler::class, $handlers[1]);
+        $this->assertNotSame($errorHandler, $handlers[1]);
+        $this->assertSame($middleware, $handlers[2]);
+        $this->assertSame($errorHandler, $handlers[3]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[4]);
+    }
+
+    public function testConstructWithMultipleContainersAndMiddlewareAndErrorHandlerClassAssignsDefaultErrorHandlerFromLastContainerBeforeMiddlewareAndErrorHandlerFromLastContainerAfterDefaultAccessLogHandler()
+    {
+        $middleware = function (ServerRequestInterface $request, callable $next) { };
+
+        $unused = $this->createMock(Container::class);
+        $unused->expects($this->never())->method('getErrorHandler');
+
+        $errorHandler1 = new ErrorHandler();
+        $container1 = $this->createMock(Container::class);
+        $container1->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler1);
+
+        $errorHandler2 = new ErrorHandler();
+        $container2 = $this->createMock(Container::class);
+        $container2->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler2);
+
+        $app = new App($unused, $container1, $middleware, $container2, ErrorHandler::class, $unused);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(5, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertSame($errorHandler1, $handlers[1]);
+        $this->assertSame($middleware, $handlers[2]);
+        $this->assertSame($errorHandler2, $handlers[3]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[4]);
+    }
+
+    public function testConstructWithAccessLogHandlerAndErrorHandlerAssignsHandlersAsGiven()
+    {
+        $accessLogHandler = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $app = new App($accessLogHandler, $errorHandler);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertSame($accessLogHandler, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithAccessLogHandlerClassAndErrorHandlerClassAssignsDefaultHandlers()
+    {
+        $app = new App(AccessLogHandler::class, ErrorHandler::class);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertInstanceOf(AccessLogHandler::class, $handlers[0]);
+        $this->assertInstanceOf(ErrorHandler::class, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithContainerAndAccessLogHandlerClassAndErrorHandlerClassAssignsHandlersFromContainer()
+    {
+        $accessLogHandler = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getAccessLogHandler')->willReturn($accessLogHandler);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($container, AccessLogHandler::class, ErrorHandler::class);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertSame($accessLogHandler, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+    public function testConstructWithMiddlewareBeforeAccessLogHandlerAndErrorHandlerAssignsDefaultErrorHandlerAsFirstHandlerFollowedByGivenHandlers()
+    {
+        $middleware = static function (ServerRequestInterface $request, callable $next) { };
+        $accessLog = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $app = new App($middleware, $accessLog, $errorHandler);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(5, $handlers);
+        $this->assertInstanceOf(ErrorHandler::class, $handlers[0]);
+        $this->assertNotSame($errorHandler, $handlers[0]);
+        $this->assertSame($middleware, $handlers[1]);
+        $this->assertSame($accessLog, $handlers[2]);
+        $this->assertSame($errorHandler, $handlers[3]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[4]);
+    }
+
+    public function testConstructWithMultipleContainersAndAccessLogHandlerClassAndErrorHandlerClassAssignsHandlersFromLastContainer()
+    {
+        $accessLogHandler = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $unused = $this->createMock(Container::class);
+        $unused->expects($this->never())->method('getErrorHandler');
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getAccessLogHandler')->willReturn($accessLogHandler);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($unused, $container, AccessLogHandler::class, ErrorHandler::class, $unused);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(3, $handlers);
+        $this->assertSame($accessLogHandler, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[2]);
+    }
+
+
+    public function testConstructWithMultipleContainersAndMiddlewareAssignsDefaultHandlersFromLastContainerBeforeMiddleware()
+    {
+        $middleware = function (ServerRequestInterface $request, callable $next) { };
+
+        $accessLogHandler = new AccessLogHandler();
+        $errorHandler = new ErrorHandler();
+
+        $unused = $this->createMock(Container::class);
+        $unused->expects($this->never())->method('getAccessLogHandler');
+        $unused->expects($this->never())->method('getErrorHandler');
+
+        $container = $this->createMock(Container::class);
+        $container->expects($this->once())->method('getAccessLogHandler')->willReturn($accessLogHandler);
+        $container->expects($this->once())->method('getErrorHandler')->willReturn($errorHandler);
+
+        $app = new App($unused, $container, $middleware, $unused);
+
+        $ref = new ReflectionProperty($app, 'handler');
+        $ref->setAccessible(true);
+        $handler = $ref->getValue($app);
+
+        $this->assertInstanceOf(MiddlewareHandler::class, $handler);
+        $ref = new ReflectionProperty($handler, 'handlers');
+        $ref->setAccessible(true);
+        $handlers = $ref->getValue($handler);
+
+        if (PHP_VERSION_ID >= 80100) {
+            $first = array_shift($handlers);
+            $this->assertInstanceOf(FiberHandler::class, $first);
+        }
+
+        $this->assertCount(4, $handlers);
+        $this->assertSame($accessLogHandler, $handlers[0]);
+        $this->assertSame($errorHandler, $handlers[1]);
+        $this->assertSame($middleware, $handlers[2]);
+        $this->assertInstanceOf(RouteHandler::class, $handlers[3]);
+    }
+
+    public function testConstructWithAccessLogHandlerOnlyThrows()
+    {
+        $accessLogHandler = new AccessLogHandler();
+
+        $this->expectException(\TypeError::class);
+        new App($accessLogHandler);
+    }
+
+    public function testConstructWithAccessLogHandlerFollowedByMiddlewareThrows()
+    {
+        $accessLogHandler = new AccessLogHandler();
+        $middleware = function (ServerRequestInterface $request, callable $next) { };
+
+        $this->expectException(\TypeError::class);
+        new App($accessLogHandler, $middleware);
+    }
+
     public function testRunWillReportListeningAddressAndRunLoopWithSocketServer()
     {
         $socket = @stream_socket_server('127.0.0.1:8080');
@@ -177,14 +603,17 @@ class AppTest extends TestCase
         $app->run();
     }
 
-    public function testRunWillReportListeningAddressFromEnvironmentAndRunLoopWithSocketServer()
+    public function testRunWillReportListeningAddressFromContainerEnvironmentAndRunLoopWithSocketServer()
     {
         $socket = @stream_socket_server('127.0.0.1:0');
         $addr = stream_socket_get_name($socket, false);
         fclose($socket);
 
-        $_SERVER['X_LISTEN'] = $addr;
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => $addr
+        ]);
+
+        $app = new App($container);
 
         // lovely: remove socket server on next tick to terminate loop
         Loop::futureTick(function () {
@@ -201,10 +630,13 @@ class AppTest extends TestCase
         $app->run();
     }
 
-    public function testRunWillReportListeningAddressFromEnvironmentWithRandomPortAndRunLoopWithSocketServer()
+    public function testRunWillReportListeningAddressFromContainerEnvironmentWithRandomPortAndRunLoopWithSocketServer()
     {
-        $_SERVER['X_LISTEN'] = '127.0.0.1:0';
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => '127.0.0.1:0'
+        ]);
+
+        $app = new App($container);
 
         // lovely: remove socket server on next tick to terminate loop
         Loop::futureTick(function () {
@@ -223,8 +655,11 @@ class AppTest extends TestCase
 
     public function testRunWillRestartLoopUntilSocketIsClosed()
     {
-        $_SERVER['X_LISTEN'] = '127.0.0.1:0';
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => '127.0.0.1:0'
+        ]);
+
+        $app = new App($container);
 
         // lovely: remove socket server on next tick to terminate loop
         Loop::futureTick(function () {
@@ -244,15 +679,18 @@ class AppTest extends TestCase
         $this->expectOutputRegex('/' . preg_quote('Warning: Loop restarted. Upgrade to react/async v4 recommended for production use.' . PHP_EOL, '/') . '$/');
         $app->run();
     }
-    
+
     /**
      * @requires function pcntl_signal
      * @requires function posix_kill
      */
     public function testRunWillStopWhenReceivingSigint()
     {
-        $_SERVER['X_LISTEN'] = '127.0.0.1:0';
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => '127.0.0.1:0'
+        ]);
+
+        $app = new App($container);
 
         Loop::futureTick(function () {
             posix_kill(getmypid(), defined('SIGINT') ? SIGINT : 2);
@@ -261,15 +699,18 @@ class AppTest extends TestCase
         $this->expectOutputRegex('/' . preg_quote('Received SIGINT, stopping loop' . PHP_EOL, '/') . '$/');
         $app->run();
     }
-    
+
     /**
      * @requires function pcntl_signal
      * @requires function posix_kill
      */
     public function testRunWillStopWhenReceivingSigterm()
     {
-        $_SERVER['X_LISTEN'] = '127.0.0.1:0';
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => '127.0.0.1:0'
+        ]);
+
+        $app = new App($container);
 
         Loop::futureTick(function () {
             posix_kill(getmypid(), defined('SIGTERM') ? SIGTERM : 15);
@@ -281,8 +722,12 @@ class AppTest extends TestCase
 
     public function testRunAppWithEmptyAddressThrows()
     {
-        $_SERVER['X_LISTEN'] = '';
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => ''
+        ]);
+
+        $app = new App($container);
+
 
         $this->expectException(\InvalidArgumentException::class);
         $app->run();
@@ -297,8 +742,11 @@ class AppTest extends TestCase
             $this->markTestSkipped('System does not prevent listening on same address twice');
         }
 
-        $_SERVER['X_LISTEN'] = $addr;
-        $app = new App();
+        $container = new Container([
+            'X_LISTEN' => $addr
+        ]);
+
+        $app = new App($container);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Failed to listen on');
@@ -481,6 +929,22 @@ class AppTest extends TestCase
         $ref->setValue($app, $router);
 
         $app->map(['GET', 'POST'], '/', function () { });
+    }
+
+    public function testGetWithAccessLogHandlerAsMiddlewareThrows()
+    {
+        $app = new App();
+
+        $this->expectException(\TypeError::class);
+        $app->get('/', new AccessLogHandler(), function () { });
+    }
+
+    public function testGetWithAccessLogHandlerClassAsMiddlewareThrows()
+    {
+        $app = new App();
+
+        $this->expectException(\TypeError::class);
+        $app->get('/', AccessLogHandler::class, function () { });
     }
 
     public function testRedirectMethodAddsAnyRouteOnRouterWhichWhenInvokedReturnsRedirectResponseWithTargetLocation()
@@ -1070,6 +1534,10 @@ class AppTest extends TestCase
 
     public function testHandleRequestWithMatchingRouteReturnsPromiseWhichFulfillsWithInternalServerErrorResponseWhenHandlerReturnsPromiseWhichRejectsWithNull()
     {
+        if (method_exists(PromiseInterface::class, 'catch')) {
+            $this->markTestSkipped('Only supported for legacy Promise v2, Promise v3 always rejects with Throwable');
+        }
+
         $app = $this->createAppWithoutLogger();
 
         $app->get('/users', function () {

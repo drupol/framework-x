@@ -1,11 +1,14 @@
 <?php
 
-namespace FrameworkX;
+namespace FrameworkX\Io;
 
 use FastRoute\DataGenerator\GroupCountBased as RouteGenerator;
 use FastRoute\Dispatcher\GroupCountBased as RouteDispatcher;
 use FastRoute\RouteCollector;
 use FastRoute\RouteParser\Std as RouteParser;
+use FrameworkX\AccessLogHandler;
+use FrameworkX\Container;
+use FrameworkX\ErrorHandler;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use React\Promise\PromiseInterface;
@@ -55,6 +58,8 @@ class RouteHandler
             if ($handler instanceof Container && $i !== $last) {
                 $container = $handler;
                 unset($handlers[$i]);
+            } elseif ($handler instanceof AccessLogHandler || $handler === AccessLogHandler::class) {
+                throw new \TypeError('AccessLogHandler may currently only be passed as a global middleware');
             } elseif (!\is_callable($handler)) {
                 $handlers[$i] = $container->callable($handler);
             }

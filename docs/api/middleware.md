@@ -13,8 +13,10 @@ You can add any number of middleware handlers to each route.
 To get started, let's take a look at a basic middleware handler
 by adding an additional callable before the final controller like this:
 
-```php
+```php title="public/index.php"
 <?php
+
+// …
 
 $app->get(
     '/user',
@@ -553,3 +555,31 @@ and also any requests that can not be routed.
 You can also combine global middleware handlers (think logging) with additional
 middleware handlers for individual routes (think authentication).
 Global middleware handlers will always be called before route middleware handlers.
+
+## Built-in middleware
+
+### AccessLogHandler
+
+> ⚠️ **Feature preview**
+>
+> This is a feature preview, i.e. it might not have made it into the current beta.
+> Give feedback to help us prioritize.
+> We also welcome [contributors](../getting-started/community.md) to help out!
+
+X ships with a built-in `AccessLogHandler` middleware that is responsible for
+logging any requests and responses from following middleware and controllers.
+This default access log handling can be configured through the [`App`](app.md).
+See [access logging](app.md#access-logging) for more details.
+
+### ErrorHandler
+
+> ⚠️ **Feature preview**
+>
+> This is a feature preview, i.e. it might not have made it into the current beta.
+> Give feedback to help us prioritize.
+> We also welcome [contributors](../getting-started/community.md) to help out!
+
+X ships with a built-in `ErrorHandler` middleware that is responsible for handling
+errors and exceptions returned from following middleware and controllers.
+This default error handling can be configured through the [`App`](app.md).
+See [error handling](app.md#error-handling) for more details.

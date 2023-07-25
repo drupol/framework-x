@@ -2,6 +2,11 @@
 
 namespace FrameworkX;
 
+use FrameworkX\Io\FiberHandler;
+use FrameworkX\Io\MiddlewareHandler;
+use FrameworkX\Io\RedirectHandler;
+use FrameworkX\Io\RouteHandler;
+use FrameworkX\Io\SapiHandler;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use React\EventLoop\Loop;
@@ -22,6 +27,9 @@ class App
     /** @var SapiHandler */
     private $sapi;
 
+    /** @var Container */
+    private $container;
+
     /**
      * Instantiate new X application
      *
@@ -38,36 +46,75 @@ class App
      */
     public function __construct(...$middleware)
     {
-        $errorHandler = new ErrorHandler();
+        // new MiddlewareHandler([$fiberHandler, $accessLogHandler, $errorHandler, ...$middleware, $routeHandler])
+        $handlers = [];
 
-        $container = new Container();
+        $this->container = $needsErrorHandler = new Container();
+
+        // only log for built-in webserver and PHP development webserver by default, others have their own access log
+        $needsAccessLog = (\PHP_SAPI === 'cli' || \PHP_SAPI === 'cli-server') ? $this->container : null;
+
         if ($middleware) {
-            foreach ($middleware as $i => $handler) {
-                if ($handler instanceof Container) {
-                    $container = $handler;
-                    unset($middleware[$i]);
-                } elseif (!\is_callable($handler)) {
-                    $middleware[$i] = $container->callable($handler);
+            $needsErrorHandlerNext = false;
+            foreach ($middleware as $handler) {
+                // load AccessLogHandler and ErrorHandler instance from last Container
+                if ($handler === AccessLogHandler::class) {
+                    $handler = $this->container->getAccessLogHandler();
+                } elseif ($handler === ErrorHandler::class) {
+                    $handler = $this->container->getErrorHandler();
                 }
+
+                // ensure AccessLogHandler is always followed by ErrorHandler
+                if ($needsErrorHandlerNext && !$handler instanceof ErrorHandler) {
+                    break;
+                }
+                $needsErrorHandlerNext = false;
+
+                if ($handler instanceof Container) {
+                    // remember last Container to load any following class names
+                    $this->container = $handler;
+
+                    // add default ErrorHandler from last Container before adding any other handlers, may be followed by other Container instances (unlikely)
+                    if (!$handlers) {
+                        $needsErrorHandler = $needsAccessLog = $this->container;
+                    }
+                } elseif (!\is_callable($handler)) {
+                    $handlers[] = $this->container->callable($handler);
+                } else {
+                    // don't need a default ErrorHandler if we're adding one as first handler or AccessLogHandler as first followed by one
+                    if ($needsErrorHandler && ($handler instanceof ErrorHandler || $handler instanceof AccessLogHandler) && !$handlers) {
+                        $needsErrorHandler = null;
+                    }
+                    $handlers[] = $handler;
+                    if ($handler instanceof AccessLogHandler) {
+                        $needsAccessLog = null;
+                        $needsErrorHandlerNext = true;
+                    }
+                }
+            }
+            if ($needsErrorHandlerNext) {
+                throw new \TypeError('AccessLogHandler must be followed by ErrorHandler');
             }
         }
 
-        // new MiddlewareHandler([$fiberHandler, $accessLogHandler, $errorHandler, ...$middleware, $routeHandler])
-        \array_unshift($middleware, $errorHandler);
+        // add default ErrorHandler as first handler unless it is already added explicitly
+        if ($needsErrorHandler instanceof Container) {
+            \array_unshift($handlers, $needsErrorHandler->getErrorHandler());
+        }
 
         // only log for built-in webserver and PHP development webserver by default, others have their own access log
-        if (\PHP_SAPI === 'cli' || \PHP_SAPI === 'cli-server') {
-            \array_unshift($middleware, new AccessLogHandler());
+        if ($needsAccessLog instanceof Container) {
+            \array_unshift($handlers, $needsAccessLog->getAccessLogHandler());
         }
 
         // automatically start new fiber for each request on PHP 8.1+
         if (\PHP_VERSION_ID >= 80100) {
-            \array_unshift($middleware, new FiberHandler()); // @codeCoverageIgnore
+            \array_unshift($handlers, new FiberHandler()); // @codeCoverageIgnore
         }
 
-        $this->router = new RouteHandler($container);
-        $middleware[] = $this->router;
-        $this->handler = new MiddlewareHandler($middleware);
+        $this->router = new RouteHandler($this->container);
+        $handlers[] = $this->router;
+        $this->handler = new MiddlewareHandler($handlers);
         $this->sapi = new SapiHandler();
     }
 
@@ -188,7 +235,7 @@ class App
             return $this->handleRequest($request);
         });
 
-        $listen = $_SERVER['X_LISTEN'] ?? '127.0.0.1:8080';
+        $listen = $this->container->getEnv('X_LISTEN') ?? '127.0.0.1:8080';
 
         $socket = new SocketServer($listen);
         $http->listen($socket);

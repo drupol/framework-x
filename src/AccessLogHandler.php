@@ -2,6 +2,7 @@
 
 namespace FrameworkX;
 
+use FrameworkX\Io\SapiHandler;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use React\Http\Message\Response;
@@ -9,7 +10,7 @@ use React\Promise\PromiseInterface;
 use React\Stream\ReadableStreamInterface;
 
 /**
- * @internal
+ * @final
  */
 class AccessLogHandler
 {
@@ -85,7 +86,7 @@ class AccessLogHandler
         }
 
         $this->sapi->log(
-            ($request->getServerParams()['REMOTE_ADDR'] ?? '-') . ' ' .
+            ($request->getAttribute('remote_addr') ?? $request->getServerParams()['REMOTE_ADDR'] ?? '-') . ' ' .
             '"' . $this->escape($method) . ' ' . $this->escape($request->getRequestTarget()) . ' HTTP/' . $request->getProtocolVersion() . '" ' .
             $status . ' ' . $responseSize . ' ' . sprintf('%.3F', $time < 0 ? 0 : $time)
         );
